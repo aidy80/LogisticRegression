@@ -1,18 +1,33 @@
+#Aidan Fike
+#October 23, 2018
+#Comp 135
+#
+#Logistic regression class. This can be used to fit and predict data 
+#from the mnist or titanic dataset.
+
 import autograd.numpy as np
 #import numpy as np
 from autograd import grad
 from autograd import elementwise_grad
 from random import random, seed
+from numpy.random import randint
 import math
+import time
 import scipy.special
 
-def Lexp(wtVec, w0, trainInstMat, trainLabelsArr, lamb):
-        normalizer = (lamb / 2.0) * (np.dot(wtVec, wtVec))
+#The logistic loss function whose gradient is used to update the feature
+#weights
+#
+#Params: wtVec - np.array of our feature weights
+#        w0 - Additional constant used to calculate eta
+#        trainInstMat - The (np.array) matrix filled with our training instances
+#        trainLabelsArr - The corresponding true labels of our training instances
+#                         in an np.array
+#        lamb - lambda used in our regularizer
+def Loss(wtVec, w0, trainInstMat, trainLabelsArr, lamb):
+        regularizer = (lamb / 2.0) * (np.dot(wtVec, wtVec))
         
         etas = np.dot(trainInstMat, wtVec)
-        #print wtVec
-        #print trainInstMat
-        #print etas
         etas = etas + w0
 
         likli = etas * trainLabelsArr
@@ -21,150 +36,248 @@ def Lexp(wtVec, w0, trainInstMat, trainLabelsArr, lamb):
 
         liksum = np.sum(likli)
 
-        return normalizer - liksum
+        return regularizer - liksum
 
+#Able to fit the titanic and mnist data sets using 
+#gradient descent or stochastic gradient descent relying on a logistic loss 
+#function. After fitting, the class also able to predict the labels of new data. 
+#There are also methods used to find the optimal hyperparameters, and predict
+#the accuracy of the classifier on new data
 class MyLogisticReg:
-    def __init__(self):
-        self.allInstances = []
-        self.allLabels = []
-        self.trainInst = []
-        self.trainLabels = []
-        self.testInst = []
-        self.testLabels = []
+
+
+    #Constructor for logistic regression class
+    #
+    #Params: dataSet - the dataSet the user wants tested. 'm' for mnist data,
+    #                   't' for titanic data
+    #        lamb - the hyperparameter lambda used in the loss function
+    def __init__(self, dataSet, lamb):
+        self.dataSet = dataSet
+        self.lamb = lamb
+
         self.wt = []
         self.w0 = 0
 
-        self.numFolds = 5
-        self.epsilon = .000001
-        self.maxStep = 10000000
-        self.decreaseInit = 10000
+        #Stochastic gradient descent methods
+        self.numRandBatches = 10000
+        self.batchSize = 10
 
+        #Parameters dependent on the dataSet being fit. Includes stepsize and
+        #epsilon for gradient descent and functions to read in the datasets
+        #themselves
+        if (dataSet == 'm'):
+            self.stepSize = 0.00000001 
+            self.epsilon = 0.000017
+            self.decreaseInit = 10000
+        elif (dataSet == 't'):
+            self.stepSize = 0.00001
+            self.epsilon = 0.002
+            self.decreaseInit = 1
+        else:
+            print "Invalid Dataset!!!!"
+
+        #Variables used to save the data from 100 steps previous 
         self.wtOld = []
         self.w0Old = 0
 
-        self.lamb = 1.0
 
-        #self.read_in_titanic_data()
-        self.read_in_mnist_data()
-        self.initRand()
-
+    #Fit the desired training data using logistic gradient descent
+    #
+    #Params: X - the np.array of training instances
+    #        y - the np.array of training labels
     def fit(self, X, y):
+        #Initialize the weights to small random numbers
+        self.initRand(X.shape[1])
+
         step = 1
         highError = True
 
-        d_LexpWt = grad(Lexp, 0)
-        d_LexpW0 = grad(Lexp, 1)
-        while (step < self.maxStep and highError):
-            stepSize = 0.00000001 
+        startTime = time.time()
 
-            wtExpGrad = d_LexpWt(self.wt, self.w0, self.trainInst, \
-                                        self.trainLabels, self.lamb)
-            w0ExpGrad = d_LexpW0(self.wt, self.w0, self.trainInst, \
-                                        self.trainLabels, self.lamb)
+        stepOutput = open('normStep.txt', 'w')
+        timeOutput = open('normTime.txt', 'w')
 
-            #print "wt grad", wtExpGrad
-            #print "w0 grad", w0ExpGrad
+        #Gradient functions using the autograd package.
+        d_LossWt = grad(Loss, 0)
+        d_LossW0 = grad(Loss, 1)
 
-            self.wt = self.wt - stepSize * wtExpGrad
-            self.w0 = self.w0 - stepSize * w0ExpGrad 
+        #Run gradient descent while the desired weights are still changing
+        #significantly
+        while (highError):
+            #The gradients for the weights of eta at the current steps
+            wtGrad = d_LossWt(self.wt, self.w0, X, \
+                                        y, self.lamb)
+            w0Grad = d_LossW0(self.wt, self.w0, X, \
+                                        y, self.lamb)
 
+            #Update the weights using the current gradient
+            self.wt = self.wt - self.stepSize * wtGrad
+            self.w0 = self.w0 - self.stepSize * w0Grad 
+
+            #Every 100 steps determine if the gradient descent should
+            #conclude becaue the weights are no longer significantly changing
             if step % 100 == 0:
-                print "step: ", step
                 totFeatErr = 0
                 for index, currFeat in enumerate(self.wt):
                     totFeatErr += math.fabs(currFeat - self.wtOld[index])
                 totFeatErr += math.fabs(self.w0 - self.w0Old)
-                diff = (1.0 / float(len(self.allInstances) + 1)) * totFeatErr
-                print "Curr Vec", self.wt[0], self.wt[len(self.wt) - 1], self.w0
-                print "diff:", diff
-                print "loss: ", Lexp(self.wt, self.w0, self.trainInst,\
-                                               self.trainLabels, self.lamb)
+                diff = (1.0 / float(X.shape[1] + 1)) * totFeatErr
+
+                stepOutput.write(str(step) + "      " + str(Loss(self.wt, self.w0,
+                    X, y, self.lamb)) + "\n")
+                timeOutput.write(str(time.time() - startTime) + "      " + \
+                    str(Loss(self.wt, self.w0, X, y, self.lamb)) + "\n")
 
                 if (diff < self.epsilon):
                     highError = False
-                    print "highError = False!"
 
                 self.w0Old = self.w0
                 self.wtOld = self.wt
 
+            if step == 1:
+                stepOutput.write(str(step) + "      " + str(Loss(self.wt, self.w0,
+                    X, y, self.lamb)) + "\n")
+                timeOutput.write(str(time.time() - startTime) + "      " + \
+                    str(Loss(self.wt, self.w0, X, y, self.lamb)) + "\n")
             step += 1
+
+
+        stepOutput.close()
+        timeOutput.close()
+
+    #Fit the current dataset using stochastic gradient descent
+    #Params: X - The np.array of training instances
+    #        y - The np.array of binary training labels
+    def SGDfit(self, X, y):
+        #Initialize the weights to small fractional numbers
+        self.initRand(X.shape[1])
+
+        step = 1
+        highError = True
+        randBatches = self.chooseRandomInsts(X)
+
+        startTime = time.time()
+
+        stepOutput = open('sgdStep.txt', 'w')
+        timeOutput = open('sgdTime.txt', 'w')
+
+        #Gradient functions using the autograd package.
+        d_LossWt = grad(Loss, 0)
+        d_LossW0 = grad(Loss, 1)
+
+        #Run gradient descent while the desired weights are still changing
+        #significantly
+        while (highError):
+            currInst = []
+            currLabels = []
+
+            #Choose the current training instances based on the indexes of the 
+            #current batch of random numbers
+            for index in randBatches[step % self.numRandBatches]:
+                currInst.append(X[index])
+                currLabels.append(y[index])
+
+            currInst = np.array(currInst)
+            currLabels = np.array(currLabels)
+
+            #The gradients for the weights of eta at the current steps given
+            #the current training data set
+            wtGrad = d_LossWt(self.wt, self.w0, currInst, \
+                                        currLabels, self.lamb)
+            w0Grad = d_LossW0(self.wt, self.w0, currInst, \
+                                        currLabels, self.lamb)
+
+            #Update the weights using the current gradient
+            self.wt = self.wt - self.stepSize * wtGrad
+            self.w0 = self.w0 - self.stepSize * w0Grad 
+
+            #Every 100 steps determine if the gradient descent should
+            #conclude becaue the weights are no longer significantly changing
+            if step % 100 == 0:
+                totFeatErr = 0
+                for index, currFeat in enumerate(self.wt):
+                    totFeatErr += math.fabs(currFeat - self.wtOld[index])
+                totFeatErr += math.fabs(self.w0 - self.w0Old)
+                diff = (1.0 / float(X.shape[1] + 1)) * totFeatErr
+
+                if step % self.numRandBatches == 0:
+                    randBatches = chooseRandomInsts(X)
+                currLoss = Loss(self.wt, self.w0, currInst, currLabels, self.lamb) *\
+                                    float(X.shape[0])/10.0
+                
+                stepOutput.write(str(step) + "         " + str(currLoss) + "\n")
+                timeOutput.write(str(time.time() - startTime) + "          " + \
+                                                        str(currLoss) + "\n")
+
+                if (diff < self.epsilon):
+                    highError = False
+
+                self.w0Old = self.w0
+                self.wtOld = self.wt
+
+            if step == 1:
+                currLoss = Loss(self.wt, self.w0, currInst, currLabels, self.lamb) *\
+                                    float(X.shape[0])/10.0
+                stepOutput.write(str(step) + "         " + str(currLoss) + "\n")
+                timeOutput.write(str(time.time() - startTime) + "          " + \
+                                                        str(currLoss) + "\n")
+                 
+            step += 1
+
+        stepOutput.close()
+        timeOutput.close()
     
+
+    #Predict the labels of given testing instances with the current weights
+    #
+    #Params: X - the np.array of testing instances
+    #
+    #Return: An np.array of the predicting training labels (made up of 8s and
+    #9s for mnist dataset and 0 and 1s for titanic dataset)
     def predict(self, X):
         etas = np.dot(X, self.wt)
         etas = etas + self.w0
 
         y_pred = []
 
-        for eta in etas:
-            if eta < 0:
-                y_pred.append(1)
-            else:
-                y_pred.append(0)
+        if (self.dataSet == 'm'):
+            for eta in etas:
+                if eta < 0:
+                    y_pred.append(8)
+                else:
+                    y_pred.append(9)
+        elif (self.dataSet == 't'):
+            for eta in etas:
+                if eta < 0:
+                    y_pred.append(0)
+                else:
+                    y_pred.append(1)
+        else:
+            print "Invalid Dataset!!!!"
 
         y_pred = np.array(y_pred)
         return y_pred
 
+
+    #Calculate the accuracy of a given set of predicted labels
+    #
+    #Params: y_test - the true labels of the testing data
+    #        y_pred - the labels of the testing data
+    #
+    #Return: The accuracy of the predicted labels in a decimal for (i.e. 0.96)
     def evaluate(self, y_test, y_pred):
-        error_rate = np.sum(np.equal(y_test, y_pred).astype(np.float)) / \
+        accuracy = np.sum(np.equal(y_test, y_pred).astype(np.float)) / \
                                                                 y_test.size
-        return 1 - error_rate
+        return accuracy
 
-    def fold(self, foldNum):
-        numTest = len(self.allInstances) / self.numFolds
-        firstFoldInst = foldNum * numTest
-        lastFoldInst = (foldNum + 1) * numTest
-
-        #print "Len instances: ", len(self.allInstances)
-        #print "Label instances: ", len(self.allLabels)
-
-        for index, instance in enumerate(self.allInstances):
-            if (index >= firstFoldInst and index < lastFoldInst):
-                self.testInst.append(instance)
-                self.testLabels.append(self.allLabels[index])
-            else:
-                self.trainInst.append(instance)
-                self.trainLabels.append(self.allLabels[index])
-
-        self.trainInst = np.array(self.trainInst)
-        self.testInst = np.array(self.testInst)
-        self.trainLabels = np.array(self.trainLabels)
-        self.testLabels = np.array(self.testLabels)
-
-    def read_in_mnist_data(self):
-        with open('mnist-train.txt', 'r') as file:
-            for line in file:
-                pixels = line.split()
-                if (pixels[0] != 'label'):
-                    newInstance = []
-                    for index, data in enumerate(pixels):
-                        if (index == 0 and data == '8'):
-                            self.allLabels.append(0)  
-                        elif (index == 0 and data == '9'):
-                            self.allLabels.append(1)  
-                        else:
-                            newInstance.append(float(data))
-
-                    self.allInstances.append(newInstance)
-
-    def read_in_titanic_data(self):
-        with open('titanic_train.txt', 'r') as file:
-            for line in file:
-                features = line.split()
-                if (features[0] == '0' or features[0] == '1'):
-                    newInstance = []
-                    for index, data in enumerate(features):
-                        if (index == 0):
-                            self.allLabels.append(int(data))
-                        else:
-                            newInstance.append(float(data))
-                                                    #/maxFeatures[index - 1])
-                    self.allInstances.append(newInstance)
-
-    def initRand(self):
+    #Initialize the feature weights with small weights from -1:1
+    #These weights are then scaled by a factor of 1 / self.decreaseInit to
+    #prevent overflow issues in the loss function
+    def initRand(self, numFeats):
         seed()
         self.wt = []
         self.w0 = 0
-        for i in range(len(self.allInstances[0])):
+        for i in range(numFeats):
             self.wt.append((2 * random() - 1) / float(self.decreaseInit))
             self.w0 = (2 * random() - 1) / float(self.decreaseInit)
 
@@ -172,93 +285,29 @@ class MyLogisticReg:
         self.wtOld = self.wt
         self.w0Old = self.w0
 
-    def main(self):
-        for i in range(self.numFolds):
-        #for i in range(1):
-            self.fold(i)
-            self.fit(self.trainInst, self.trainLabels)
-            y_pred = self.predict(self.testInst)
-            print y_pred
-            print self.testLabels
-            acc = self.evaluate(self.testLabels, y_pred)
-            print "Accuracy: ", acc
-            #print "Final weights: ", self.wt, self.w0
-            self.trainInst = []
-            self.trainLabels = []
-            self.testInst = []
-            self.testLabels = []
-            self.initRand()
+    #Create a 2D list with self.numRandBatches number of batches of batchSize.
+    #These batches contain indexes meant to represent indexes of the
+    #allInstances list
+    #
+    #Params: allInstances - A list of instances the batches will be made from
+    #Return: The 2D list containing batches of indexes
+    def chooseRandomInsts(self, allInstances):
+        randBatches = []
+        rand = []
+        for i in range(self.numRandBatches):
+            rand = randint(0, allInstances.shape[0], self.batchSize) 
+            while len(rand) != len(set(rand)):
+                rand = randint(0, allInstances.shape[0], self.batchSize) 
+            randBatches.append(rand)
 
-test = MyLogisticReg()
-test.main()
+        return randBatches
 
-def LgradWt(wtVec, w0, trainInstMat, trainLabelsArr, lamb):
-    etas = np.matmul(trainInstMat, wtVec)
-    etas = etas + w0
+    #Change the value of lambda, the coefficient for the regulizer
+    #
+    #Params: newLamb - the new desired value of lambda
+    def setLamb(self, newLamb):
+        self.lamb = newLamb
 
-    gradWeights = trainLabelsArr - scipy.special.expit(etas)
-    grad = np.transpose(np.matmul(np.transpose(trainInstMat), gradWeights))
-
-    return grad * -1
-
-def LgradW0(wtVec, w0, trainInstMat, trainLabelsArr, lamb):
-    etas = np.matmul(trainInstMat, wtVec)
-    etas = etas + w0
-
-    gradWeights = trainLabelsArr - scipy.special.expit(etas)
-    grad = np.sum(gradWeights)
-
-    return grad * -1
-
-def splitTrainTest(self, numTrain, numTest):
-        totNumSplits = numTrain + numTest
-        numInstPerSplit = len(allInstances) / totNumSplits  
-        for index, instance in enumerate(allInstances):
-            if (index < numInstPerSplit * numTrain):
-                self.trainInst.append(instance)
-                self.trainLabels.append(allLabels[index])
-            else:
-                self.testInst.append(instance)
-                self.testLabels.append(allLabels[index])
-
-        self.trainInst = np.array(self.trainInst)
-        self.testInst = np.array(self.testInst)
-        self.trainLabels = np.array(self.trainLabels)
-        self.testLabels = np.array(self.testLabels)
-
-"""
-        maxFeatures = np.zeros(7)
-        with open('titanic_train.txt', 'r') as file:
-            for line in file:
-                features = line.split()
-                if (features[0] == '0' or features[0] == '1'):
-                    for index, feature in enumerate(features):
-                        if (index != 0):
-                            if (float(feature) > maxFeatures[index - 1]):
-                                maxFeatures[index - 1] = float(feature)
-                            """
-
-def createBinaryMask(wtVec, w0, trainInstMat):
-    etas = np.matmul(trainInstMat, np.transpose(wtVec))
-    below30 = []
-    for eta in etas:
-        if eta < 5:
-            below30.append(True)
-        else:
-            below30.append(False)
-
-    return below30
-
-def Lsimp(wtVec, w0, trainInstMat, trainLabelsArr, lamb):
-        normalizer = (lamb / 2.0) * (np.dot(wtVec, wtVec))
-        
-        etas = np.matmul(trainInstMat, np.transpose(wtVec))
-        etas = etas + w0
-
-        likli = etas * trainLabelsArr
-        likli = likli - etas
-        
-        liksum = np.sum(likli)
-
-        return normalizer - liksum
-        #return -1 * liksum
+    #Give user the weight for the random feature (the last weight)
+    def getRandFeatWeight(self):
+        return self.wt[len(self.wt) - 1]

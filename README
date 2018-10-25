@@ -1,0 +1,23 @@
+This program is broken into three sections: logReg.py which contains the
+logistic regression classifier itself, analyzeData.py where the mnist and
+titanic datasets are parsed and seperated into training and testing sets. In
+analyzeData.py the logistic regression is also analyzed using the datasets
+for its accuracy, best hyperparameters, and training time. Finally, main.py
+runs the tests created in analyzeData.py on the mnist and titanic datasets and
+pickles the classifier on both the titanic and mnist datasets. 
+
+To run these tests, simply run
+    python main.py
+This will find the accuracy of several lambda values on both datasets and
+output them to the files mnistTestAcc.dat, mnistTrainAcc.dat, titTestAcc.dat,
+and titTrainAcc.dat. It will also time the stochastic and normal gradient
+descent algorithms and output points about the loss function and time into the
+files normStep.txt, normTime.txt, sgdStep.txt, sgdTime.txt. Finally, cross
+validation will be run on the two datasets with the best found lambdas to test
+the accuracies and output the results to the files titAcc.dat and mnistAcc.dat.
+
+Warning: These processes will take a while (roughly 10 minutes for the large
+processes) due to a small step size. To increase the speed of the convergence, 
+you can decrease the value of epsilon in the logReg files for both classifiers. 
+Do not, however, decrease the step size, this must be small for the 
+algorithm to work correctly.
